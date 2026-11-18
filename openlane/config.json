@@ -1,0 +1,87 @@
+{
+    "DESIGN_NAME": "soc_top",
+
+    "VERILOG_FILES": [
+        "dir::src/cpu/agu.v",
+        "dir::src/cpu/alu.v",
+        "dir::src/cpu/branch_unit.v",
+        "dir::src/cpu/btb.v",
+        "dir::src/cpu/cpu.v",
+        "dir::src/cpu/decoder.v",
+        "dir::src/cpu/forwarding_unit.v",
+        "dir::src/cpu/hazard_unit.v",
+        "dir::src/cpu/muldiv.v",
+        "dir::src/cpu/pipeline.v",
+        "dir::src/cpu/predictor.v",
+        "dir::src/cpu/regfile.v",
+        "dir::src/cpu/rv32i.v",
+        "dir::src/cpu/rv64m.v",
+        "dir::src/cpu/memory.v",
+        "dir::src/sram/ram_sp.v",
+        "dir::src/data_streaming_engine/dma_read_engine.v",
+        "dir::src/data_streaming_engine/data_streaming_engine.v",
+        "dir::src/interconnect/cpu_axi_lite_bridge.v",
+        "dir::src/interconnect/axi_lite_regs.v",
+        "dir::src/adapters/axis_to_pixel.v",
+        "dir::src/cnn/mac_unit.v",
+        "dir::src/cnn/line_buffer.v",
+        "dir::src/cnn/control_logic.v",
+        "dir::src/cnn/convolution.v",
+        "dir::src/cnn/conv.v",
+        "dir::src/cnn/ReLU.v",
+        "dir::src/cnn/MaxPool.v",
+        "dir::src/cnn/FC.v",
+        "dir::src/soc_top.v"
+    ],
+
+    "VERILOG_INCLUDE_DIRS": [
+        "dir::src",
+        "dir::src/cpu"
+    ],
+
+    "VERILOG_DEFINES": [
+        "SYNTHESIS"
+    ],
+
+    "CLOCK_PORT": "clk",
+    "CLOCK_PERIOD": 20.0,
+
+    "DESIGN_IS_CORE": false,
+
+    "FP_SIZING": "absolute",
+    "DIE_AREA": "0 0 1600 1600",
+    "CORE_AREA": "80 80 1520 1520",
+
+    "FP_CORE_UTIL": 25,
+    "PL_TARGET_DENSITY": 0.40,
+
+    "FP_IO_MODE": 1,
+    "FP_IO_VEXTEND": 2.0,
+    "FP_IO_HEXTEND": 2.0,
+    "FP_IO_VTHICKNESS_MULT": 2,
+    "FP_IO_HTHICKNESS_MULT": 2,
+    "FP_IO_VMINEXTEND": 1.5,
+    "FP_IO_HMINEXTEND": 1.5,
+
+    "FP_PDN_MULTILAYER": true,
+    "FP_PDN_CORE_RING": true,
+
+    "SYNTH_HIERARCHICAL": true,
+    "SYNTH_NO_FLAT": true,
+
+    "GRT_ALLOW_CONGESTION": true,
+    "GRT_OVERFLOW_ITERS": 100,
+    "GRT_ANT_ITERS": 20,
+    "DRT_OPT_ITERS": 16,
+
+    "GLB_RESIZER_TIMING_OPTIMIZATIONS": 0,
+    "GLB_RESIZER_DESIGN_OPTIMIZATIONS": 0,
+    "PL_RESIZER_DESIGN_OPTIMIZATIONS": 0,
+    "PL_RESIZER_TIMING_OPTIMIZATIONS": 0,
+
+    "QUIT_ON_LINTER_ERRORS": false,
+    "QUIT_ON_LINTER_WARNINGS": false,
+    "QUIT_ON_SYNTH_CHECKS": false,
+
+    "FP_PIN_ORDER_CFG": "dir::pin_order.cfg"
+}
