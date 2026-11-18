@@ -1,0 +1,83 @@
+# ==========================================
+# Full SoC Yosys synthesis
+# Top: soc_top
+# Platform: SKY130 (generic exploration)
+# ==========================================
+#
+# Notes:
+#   - main_memory (cpu/memory.v) is behavioural and intended
+#     for simulation only. For a real ASIC flow it should be
+#     replaced by a black-box or foundry SRAM.
+#   - This script is for independent elaboration / area check.
+#     The production flow uses OpenLane (openlane/soc_top/).
+#
+
+# ---------- CPU ----------
+read_verilog -Irtl/cpu -sv rtl/cpu/defines.vh
+read_verilog -Irtl/cpu -sv rtl/cpu/decoder.v
+read_verilog -Irtl/cpu -sv rtl/cpu/rv32i.v
+read_verilog -Irtl/cpu -sv rtl/cpu/rv64m.v
+read_verilog -Irtl/cpu -sv rtl/cpu/alu.v
+read_verilog -Irtl/cpu -sv rtl/cpu/agu.v
+read_verilog -Irtl/cpu -sv rtl/cpu/branch_unit.v
+read_verilog -Irtl/cpu -sv rtl/cpu/muldiv.v
+read_verilog -Irtl/cpu -sv rtl/cpu/regfile.v
+read_verilog -Irtl/cpu -sv rtl/cpu/forwarding_unit.v
+read_verilog -Irtl/cpu -sv rtl/cpu/hazard_unit.v
+read_verilog -Irtl/cpu -sv rtl/cpu/btb.v
+read_verilog -Irtl/cpu -sv rtl/cpu/predictor.v
+read_verilog -Irtl/cpu -sv rtl/cpu/pipeline.v
+read_verilog -Irtl/cpu -sv rtl/cpu/cpu.v
+read_verilog -Irtl/cpu -sv rtl/cpu/memory.v
+
+# ---------- SRAM ----------
+read_verilog -sv rtl/sram/ram_sp.v
+
+# ---------- Data Streaming Engine ----------
+read_verilog -sv rtl/data_streaming_engine/fifo_sync.v
+read_verilog -sv rtl/data_streaming_engine/axi_stream_fifo.v
+read_verilog -sv rtl/data_streaming_engine/axi_stream_arbiter.v
+read_verilog -sv rtl/data_streaming_engine/axi_stream_broadcaster.v
+read_verilog -sv rtl/data_streaming_engine/axi_stream_switch.v
+read_verilog -sv rtl/data_streaming_engine/axi_stream_register_slice.v
+read_verilog -sv rtl/data_streaming_engine/dma_address_generator.v
+read_verilog -sv rtl/data_streaming_engine/dma_descriptor_manager.v
+read_verilog -sv rtl/data_streaming_engine/dma_read_engine.v
+read_verilog -sv rtl/data_streaming_engine/dma_write_engine.v
+read_verilog -sv rtl/data_streaming_engine/data_streaming_engine.v
+
+# ---------- Interconnect ----------
+read_verilog -sv rtl/interconnect/cpu_axi_lite_bridge.v
+read_verilog -sv rtl/interconnect/axi_lite_regs.v
+
+# ---------- Adapters ----------
+read_verilog -sv rtl/adapters/axis_to_pixel.v
+
+# ---------- CNN ----------
+read_verilog -sv rtl/cnn/mac_unit.v
+read_verilog -sv rtl/cnn/line_buffer.v
+read_verilog -sv rtl/cnn/control_logic.v
+read_verilog -sv rtl/cnn/convolution.v
+read_verilog -sv rtl/cnn/conv.v
+read_verilog -sv rtl/cnn/ReLU.v
+read_verilog -sv rtl/cnn/MaxPool.v
+read_verilog -sv rtl/cnn/FC.v
+
+# ---------- SoC top ----------
+read_verilog -Irtl/cpu -sv rtl/soc_top.v
+
+# Elaboration
+hierarchy -check -top soc_top
+
+# Generic synthesis
+proc
+opt
+memory
+opt
+synth -top soc_top
+
+# Statistics
+stat
+
+# Netlist
+write_verilog -noattr synth/soc_top_synth.v

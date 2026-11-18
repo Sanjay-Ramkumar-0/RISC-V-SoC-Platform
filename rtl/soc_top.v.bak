@@ -1,0 +1,274 @@
+// ============================================================
+//  SoC Top Level
+//  RISC-V + AXI-Lite Control + Streaming Engine + CNN
+// ============================================================
+
+`timescale 1ns/1ps
+`include "defines.vh"
+
+module soc_top #(
+    parameter XLEN       = `XLEN,
+    parameter ADDR_WIDTH = 32,
+    parameter DATA_WIDTH = 32,
+    parameter MEM_DEPTH  = 2048
+)(
+    input  wire             clk,
+    input  wire             rst_n,
+
+    // Optional external UART / debug (can be left unconnected)
+    output wire [XLEN-1:0]  debug_pc,
+    output wire             debug_stall,
+    output wire             irq_cnn_done
+);
+
+    // ----------------------------------------------------------------
+    // RISC-V Core
+    // ----------------------------------------------------------------
+    wire [XLEN-1:0] imem_addr;
+    wire [31:0]     imem_rdata;
+    wire [XLEN-1:0] dmem_addr;
+    wire [XLEN-1:0] dmem_wdata;
+    wire            dmem_we;
+    wire            dmem_re;
+    wire [1:0]      dmem_size;
+    wire [XLEN-1:0] dmem_rdata;
+    wire            dmem_ready;
+
+    cpu #(.XLEN(XLEN)) u_cpu (
+        .clk         (clk),
+        .rst_n       (rst_n),
+        .imem_addr   (imem_addr),
+        .imem_rdata  (imem_rdata),
+        .dmem_addr   (dmem_addr),
+        .dmem_wdata  (dmem_wdata),
+        .dmem_we     (dmem_we),
+        .dmem_re     (dmem_re),
+        .dmem_size   (dmem_size),
+        .dmem_rdata  (dmem_rdata),
+        .dmem_ready  (dmem_ready),
+        .debug_pc    (debug_pc),
+        .debug_stall (debug_stall)
+    );
+
+    // ----------------------------------------------------------------
+    // Address decode
+    // Base address of Streaming Engine + CNN control : 0x1000_0000
+    // ----------------------------------------------------------------
+    wire        is_accel_access = (dmem_addr[31:16] == 16'h1000);
+    wire        accel_we        = dmem_we && is_accel_access;
+    wire        accel_re        = dmem_re && is_accel_access;
+
+    // ----------------------------------------------------------------
+    // Simple instruction / data memory (main memory)
+    // ----------------------------------------------------------------
+    wire [XLEN-1:0] main_mem_rdata;
+
+    main_memory #(
+        .DEPTH (MEM_DEPTH),
+        .XLEN  (XLEN)
+    ) u_main_mem (
+        .clk     (clk),
+        .i_addr  (imem_addr),
+        .i_rdata (imem_rdata),
+        .d_addr  (dmem_addr),
+        .d_re    (dmem_re && !is_accel_access),
+        .d_we    (dmem_we && !is_accel_access),
+        .d_size  (dmem_size),
+        .d_wdata (dmem_wdata),
+        .d_rdata (main_mem_rdata)
+    );
+
+    // For now dmem_ready is always 1 (combinational memory)
+    assign dmem_ready = 1'b1;
+
+    // ----------------------------------------------------------------
+    // AXI-Lite style register interface (simplified for this SoC)
+    // We implement a lightweight bus bridge from the CPU data port.
+    // ----------------------------------------------------------------
+    wire        ctrl_start;
+    wire        ctrl_soft_reset;
+    wire        status_busy;
+    wire        status_done;
+    wire        status_cnn_valid;
+    wire [31:0] reg_src_addr;
+    wire [31:0] reg_dst_addr;
+    wire [15:0] reg_length;
+    wire [3:0]  cnn_prediction;
+    wire        irq_enable;
+    wire        irq;
+
+    // Simple register file that the CPU can read/write via dmem
+    // (This avoids a full AXI-Lite interconnect for the first version)
+    reg [31:0]  reg_control;
+    reg [31:0]  reg_src;
+    reg [31:0]  reg_dst;
+    reg [15:0]  reg_len;
+    reg         reg_irq_en;
+    reg         reg_irq_status;
+    reg [31:0]  accel_rdata;
+
+    assign ctrl_start      = reg_control[0];
+    assign ctrl_soft_reset = reg_control[1];
+    assign reg_src_addr    = reg_src;
+    assign reg_dst_addr    = reg_dst;
+    assign reg_length      = reg_len;
+    assign irq_enable      = reg_irq_en;
+    assign irq_cnn_done    = irq_enable && reg_irq_status;
+
+    always @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            reg_control    <= 32'd0;
+            reg_src        <= 32'd0;
+            reg_dst        <= 32'd0;
+            reg_len        <= 16'd784;
+            reg_irq_en     <= 1'b0;
+            reg_irq_status <= 1'b0;
+            accel_rdata    <= 32'd0;
+        end else begin
+            // Clear start pulse after one cycle
+            if (reg_control[0])
+                reg_control[0] <= 1'b0;
+
+            if (status_done)
+                reg_irq_status <= 1'b1;
+
+            if (accel_we) begin
+                case (dmem_addr[7:0])
+                    8'h00: reg_control <= dmem_wdata;
+                    8'h08: reg_src     <= dmem_wdata;
+                    8'h0C: reg_dst     <= dmem_wdata;
+                    8'h10: reg_len     <= dmem_wdata[15:0];
+                    8'h18: reg_irq_en  <= dmem_wdata[0];
+                    8'h1C: if (dmem_wdata[0]) reg_irq_status <= 1'b0; // W1C
+                    default: ;
+                endcase
+            end
+
+            if (accel_re) begin
+                case (dmem_addr[7:0])
+                    8'h00: accel_rdata <= reg_control;
+                    8'h04: accel_rdata <= {29'd0, status_cnn_valid, status_done, status_busy};
+                    8'h08: accel_rdata <= reg_src;
+                    8'h0C: accel_rdata <= reg_dst;
+                    8'h10: accel_rdata <= {16'd0, reg_len};
+                    8'h14: accel_rdata <= {28'd0, cnn_prediction};
+                    8'h18: accel_rdata <= {31'd0, reg_irq_en};
+                    8'h1C: accel_rdata <= {31'd0, reg_irq_status};
+                    default: accel_rdata <= 32'd0;
+                endcase
+            end
+        end
+    end
+
+    // Mux dmem_rdata between accelerator registers and main memory
+    assign dmem_rdata = is_accel_access ? accel_rdata : main_mem_rdata;
+
+    // ----------------------------------------------------------------
+    // Streaming Engine (DMA Read + Image SRAM)
+    // ----------------------------------------------------------------
+    wire [DATA_WIDTH-1:0] axis_tdata;
+    wire                  axis_tvalid;
+    wire                  axis_tready;
+    wire                  axis_tlast;
+    wire                  se_busy;
+    wire                  se_done;
+
+    streaming_engine_cnn #(
+        .ADDR_WIDTH (ADDR_WIDTH),
+        .DATA_WIDTH (DATA_WIDTH),
+        .LEN_WIDTH  (16),
+        .MEM_DEPTH  (MEM_DEPTH)
+    ) u_streaming_engine (
+        .clk            (clk),
+        .rst_n          (rst_n),
+        .start          (ctrl_start),
+        .src_addr       (reg_src_addr),
+        .transfer_len   (reg_length),
+        .busy           (se_busy),
+        .done           (se_done),
+        // Image preload port (CPU can also write image via this if mapped)
+        .img_mem_addr   (dmem_addr),
+        .img_mem_wdata  (dmem_wdata),
+        .img_mem_we     (1'b0),          // for now preload via main_memory or testbench
+        .img_mem_rdata  (),
+        // AXI-Stream out
+        .m_axis_tdata   (axis_tdata),
+        .m_axis_tvalid  (axis_tvalid),
+        .m_axis_tready  (axis_tready),
+        .m_axis_tlast   (axis_tlast)
+    );
+
+    assign status_busy = se_busy;
+    assign status_done = se_done;
+
+    // ----------------------------------------------------------------
+    // AXI-Stream → Pixel adapter
+    // ----------------------------------------------------------------
+    wire [7:0]  pixel;
+    wire        pixel_valid;
+    wire        pixel_ready = 1'b1;   // CNN currently has no back-pressure
+    wire        frame_done;
+
+    axis_to_pixel #(
+        .DATA_WIDTH  (DATA_WIDTH),
+        .PIXEL_WIDTH (8)
+    ) u_axis_to_pixel (
+        .clk             (clk),
+        .rst_n           (rst_n),
+        .s_axis_tdata    (axis_tdata),
+        .s_axis_tvalid   (axis_tvalid),
+        .s_axis_tready   (axis_tready),
+        .s_axis_tlast    (axis_tlast),
+        .pixel_out       (pixel),
+        .pixel_out_valid (pixel_valid),
+        .pixel_out_ready (pixel_ready),
+        .enable          (se_busy || ctrl_start),
+        .frame_done      (frame_done)
+    );
+
+    // ----------------------------------------------------------------
+    // CNN Accelerator
+    // ----------------------------------------------------------------
+    wire [3:0] prediction;
+    wire       cnn_valid;
+
+    conv #(
+        .DATA_WIDTH   (8),
+        .KERNEL_SIZE  (3),
+        .IMAGE_WIDTH  (28),
+        .IMAGE_HEIGHT (28)
+    ) u_cnn (
+        .clk            (clk),
+        .rst            (~rst_n),          // CNN uses active-high reset
+        .pixel_in       (pixel),
+        .pixel_in_valid (pixel_valid),
+        .start          (ctrl_start),
+        .prediction     (prediction),
+        .data_out_valid (cnn_valid),
+        // status outputs left open for now
+        .conv_start     (),
+        .conv_done      (),
+        .conv_busy      (),
+        .conv_valid_in  (),
+        .conv_valid_out (),
+        .relu_start     (),
+        .relu_done      (),
+        .relu_busy      (),
+        .relu_valid_in  (),
+        .relu_valid_out (),
+        .pool_start     (),
+        .pool_done      (),
+        .pool_busy      (),
+        .pool_valid_in  (),
+        .pool_valid_out (),
+        .fc_start       (),
+        .fc_done        (),
+        .fc_busy        (),
+        .fc_valid_in    (),
+        .fc_valid_out   ()
+    );
+
+    assign cnn_prediction  = prediction;
+    assign status_cnn_valid = cnn_valid;
+
+endmodule
